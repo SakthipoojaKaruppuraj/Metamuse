@@ -125,17 +125,31 @@ export function normalizeError(error: any): string {
 }
 
 /**
+ * Safely parses token IDs (e.g. "#1", "1", 1, 1n) into a BigInt.
+ */
+export function parseTokenIdToBigInt(tokenId: string | number | bigint): bigint {
+  if (typeof tokenId === 'bigint') return tokenId
+  if (typeof tokenId === 'number') return BigInt(tokenId)
+  const clean = String(tokenId).replace(/^#/, '').trim()
+  try {
+    return BigInt(clean)
+  } catch {
+    return BigInt(0)
+  }
+}
+
+/**
  * Reads the latest attestation for a given NFT from the registry.
  */
 export async function getLatestAttestation(
   nftContract: string,
-  tokenId: string
+  tokenId: string | number | bigint
 ): Promise<AttestationRecord> {
   const data = await publicClient.readContract({
     address: MONAD_PROVENANCE_REGISTRY_ADDRESS,
     abi: NFTProvenanceRegistryABI,
     functionName: 'getLatestAttestation',
-    args: [nftContract as Address, BigInt(tokenId)],
+    args: [nftContract as Address, parseTokenIdToBigInt(tokenId)],
   }) as {
     evidenceHash: `0x${string}`
     provenanceHash: `0x${string}`
@@ -158,13 +172,13 @@ export async function getLatestAttestation(
  */
 export async function getAttestationHistory(
   nftContract: string,
-  tokenId: string
+  tokenId: string | number | bigint
 ): Promise<AttestationRecord[]> {
   const data = await publicClient.readContract({
     address: MONAD_PROVENANCE_REGISTRY_ADDRESS,
     abi: NFTProvenanceRegistryABI,
     functionName: 'getAttestationHistory',
-    args: [nftContract as Address, BigInt(tokenId)],
+    args: [nftContract as Address, parseTokenIdToBigInt(tokenId)],
   }) as Array<{
     evidenceHash: `0x${string}`
     provenanceHash: `0x${string}`
@@ -187,14 +201,14 @@ export async function getAttestationHistory(
  */
 export async function verifyAttestation(
   nftContract: string,
-  tokenId: string,
+  tokenId: string | number | bigint,
   currentEvidenceHash: string
 ): Promise<boolean> {
   return await publicClient.readContract({
     address: MONAD_PROVENANCE_REGISTRY_ADDRESS,
     abi: NFTProvenanceRegistryABI,
     functionName: 'verifyAttestation',
-    args: [nftContract as Address, BigInt(tokenId), currentEvidenceHash as Hash],
+    args: [nftContract as Address, parseTokenIdToBigInt(tokenId), currentEvidenceHash as Hash],
   }) as boolean
 }
 
@@ -203,7 +217,7 @@ export async function verifyAttestation(
  */
 export async function attestProvenance(
   nftContract: string,
-  tokenId: string,
+  tokenId: string | number | bigint,
   evidenceHash: string,
   provenanceHash: string
 ): Promise<{ transactionHash: `0x${string}`; blockNumber: bigint; status: 'success' | 'reverted' }> {
@@ -224,7 +238,7 @@ export async function attestProvenance(
     address: MONAD_PROVENANCE_REGISTRY_ADDRESS,
     abi: NFTProvenanceRegistryABI,
     functionName: 'attestProvenance',
-    args: [nftContract as Address, BigInt(tokenId), evidenceHash as Hash, provenanceHash as Hash],
+    args: [nftContract as Address, parseTokenIdToBigInt(tokenId), evidenceHash as Hash, provenanceHash as Hash],
   })
 
   // Wait for block confirmation receipt

@@ -300,7 +300,7 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
       {/* NFT Summary Card */}
       <Card className="p-4 flex items-center gap-4 border-primary/20 bg-primary/5">
         <div className="relative size-16 shrink-0 rounded-lg overflow-hidden border border-border bg-card">
-          <img src={nft.image} alt={nft.collection} className="object-cover size-full" />
+          <img src={nft.image || '/placeholder.svg'} alt={nft.collection} className="object-cover size-full" />
         </div>
         <div>
           <h3 className="text-sm font-bold text-foreground">{nft.collection} {nft.tokenId}</h3>
