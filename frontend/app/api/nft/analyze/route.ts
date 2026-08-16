@@ -270,9 +270,8 @@ export async function POST(request: Request) {
 
     // Construct final matching UI NFT asset (fully compatible with page.tsx)
     const nftResult: NFT & {
-      nft: NFTAsset
-      provenance: ProvenanceRecord
-      evidence: EvidenceItem[]
+      rawNft: NFTAsset
+      provenanceRecord: ProvenanceRecord
       context: ContextPackage
       explanation: ExplanationPackage
       confidence: number
@@ -317,8 +316,8 @@ export async function POST(request: Request) {
         image: 'https://i.seadn.io/gae/yNiF1s2ZrlwJe7wmLre46CBoCfJstg5J95E4gCH69E4B3_1sN_g3L5E0J5D9J1F9_G6=w600',
         similarity: 99
       },
-      nft: openseaAsset,
-      provenance: provenanceRecord,
+      rawNft: openseaAsset,
+      provenanceRecord,
       context: contextPackage,
       explanation,
       confidence: confidenceScore,

@@ -111,7 +111,8 @@ export default function NFTResultPage({ params }: { params: Promise<{ id: string
   }
 
   // Helper to parse citations dynamically into clickable anchor links
-  const renderClickableCitations = (text: string) => {
+  const renderClickableCitations = (text?: string) => {
+    if (!text) return ''
     const regex = /\[(\d+)\]/g
     const parts = text.split(regex)
     
@@ -133,8 +134,8 @@ export default function NFTResultPage({ params }: { params: Promise<{ id: string
     })
   }
 
-  const filteredEvidence = nft.evidence.filter(
-    (item) => evidenceFilter === 'all' || item.type === evidenceFilter
+  const filteredEvidence = (nft?.evidence || []).filter(
+    (item: any) => evidenceFilter === 'all' || item.type === evidenceFilter
   )
 
   return (
@@ -245,7 +246,7 @@ export default function NFTResultPage({ params }: { params: Promise<{ id: string
                   <div>
                     <h4 className="text-xs font-semibold text-muted-foreground">Declared Visual Traits</h4>
                     <ul className="mt-2 space-y-1.5">
-                      {nft.visualTraits.map((t) => (
+                      {(nft?.visualTraits || []).map((t: any) => (
                         <li key={t.label} className="text-xs text-foreground flex justify-between border-b border-border pb-1">
                           <span className="text-muted-foreground">{t.label}:</span>
                           <span className="font-semibold">{t.value}</span>
@@ -256,7 +257,7 @@ export default function NFTResultPage({ params }: { params: Promise<{ id: string
                   <div>
                     <h4 className="text-xs font-semibold text-muted-foreground">Metadata Declared Traits</h4>
                     <ul className="mt-2 space-y-1.5">
-                      {nft.metadataTraits.map((t) => (
+                      {(nft?.metadataTraits || []).map((t: any) => (
                         <li key={t.label} className="text-xs text-foreground flex justify-between border-b border-border pb-1">
                           <span className="text-muted-foreground">{t.label}:</span>
                           <span className="font-semibold">{t.value}</span>
@@ -346,7 +347,7 @@ export default function NFTResultPage({ params }: { params: Promise<{ id: string
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            {filteredEvidence.map((item, index) => (
+            {filteredEvidence.map((item: any, index: number) => (
               <div key={item.id} id={item.id} className="scroll-mt-36">
                 <EvidenceCard item={{ ...item, id: `${index + 1}` }} />
               </div>
@@ -381,33 +382,33 @@ export default function NFTResultPage({ params }: { params: Promise<{ id: string
             {[
               {
                 label: 'On-chain evidence',
-                status: nft.provenanceConfidence >= 80 ? 'Strong' : 'Weak',
+                status: (nft?.provenanceConfidence ?? 0) >= 80 ? 'Strong' : 'Weak',
                 desc: 'Mints and deployers resolve to verified cryptographic hashes.',
-                ok: nft.provenanceConfidence >= 80
+                ok: (nft?.provenanceConfidence ?? 0) >= 80
               },
               {
                 label: 'Metadata completeness',
-                status: nft.tokenUri.startsWith('ipfs') ? 'Strong' : 'Mutable',
+                status: (nft?.tokenUri || '').startsWith('ipfs') ? 'Strong' : 'Mutable',
                 desc: 'IPFS pinning protects against host content updates.',
-                ok: nft.tokenUri.startsWith('ipfs')
+                ok: (nft?.tokenUri || '').startsWith('ipfs')
               },
               {
                 label: 'Creator validation',
-                status: nft.creator !== '0x0000000000000000000000000000000000000000' ? 'Verified' : 'Anonymous',
+                status: nft?.creator && nft.creator !== '0x0000000000000000000000000000000000000000' ? 'Verified' : 'Anonymous',
                 desc: 'Deployed contract maps back to identified creator wallets.',
-                ok: nft.creator !== '0x0000000000000000000000000000000000000000'
+                ok: !!(nft?.creator && nft.creator !== '0x0000000000000000000000000000000000000000')
               },
               {
                 label: 'Project context',
-                status: nft.id !== 'example-collection-721' ? 'Source-backed' : 'Unknown',
+                status: nft?.id !== 'example-collection-721' ? 'Source-backed' : 'Unknown',
                 desc: 'Official website claims and socials align with deployer keys.',
-                ok: nft.id !== 'example-collection-721'
+                ok: nft?.id !== 'example-collection-721'
               },
               {
                 label: 'Artwork relationship',
-                status: nft.id === 'example-divergent-44' ? 'Altered' : 'Inferred',
+                status: nft?.id === 'example-divergent-44' ? 'Altered' : 'Inferred',
                 desc: 'Fingerprint similarity scan confirms template correlation.',
-                ok: nft.id !== 'example-divergent-44'
+                ok: nft?.id !== 'example-divergent-44'
               }
             ].map((check) => (
               <div key={check.label} className="py-4 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">

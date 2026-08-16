@@ -49,8 +49,8 @@ export interface ProvenanceRecord {
 }
 
 // Scanning boundaries configuration
-const CHUNK_SIZE = 150000n
-const MAX_BLOCKS_SCANNED = 3000000n // Search up to ~3M blocks (approx 1.2 years)
+const CHUNK_SIZE = BigInt(150000)
+const MAX_BLOCKS_SCANNED = BigInt(3000000) // Search up to ~3M blocks (approx 1.2 years)
 
 /**
  * Resolves and caches block timestamps to prevent RPC duplicate fetch limits.
@@ -84,7 +84,7 @@ async function getOnChainTransferLogs(
     let toBlock = latestBlock
     let fromBlock = toBlock - CHUNK_SIZE
     let logs: any[] = []
-    let scannedBlocks = 0n
+    let scannedBlocks = BigInt(0)
 
     const transferAbi = parseAbiItem(
       'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'
@@ -96,7 +96,7 @@ async function getOnChainTransferLogs(
         address: contractAddress,
         event: transferAbi,
         args: { tokenId: BigInt(tokenId) },
-        fromBlock: 0n,
+        fromBlock: BigInt(0),
         toBlock: latestBlock,
       })
       const hasMint = quickLogs.some(
@@ -117,7 +117,7 @@ async function getOnChainTransferLogs(
           address: contractAddress,
           event: transferAbi,
           args: { tokenId: BigInt(tokenId) },
-          fromBlock: toBlock - 300000n,
+          fromBlock: toBlock - BigInt(300000),
           toBlock,
         })
         
@@ -128,16 +128,16 @@ async function getOnChainTransferLogs(
           return quickLogs
         }
         logs = quickLogs
-        toBlock = toBlock - 300001n
+        toBlock = toBlock - BigInt(300001)
         fromBlock = toBlock - CHUNK_SIZE
-        scannedBlocks += 300000n
+        scannedBlocks += BigInt(300000)
       } catch {
         console.log('EVM RPC bulk query limit hit, falling back to chunked query loop...')
       }
     }
 
-    while (scannedBlocks < MAX_BLOCKS_SCANNED && toBlock > 0n) {
-      if (fromBlock < 0n) fromBlock = 0n
+    while (scannedBlocks < MAX_BLOCKS_SCANNED && toBlock > BigInt(0)) {
+      if (fromBlock < BigInt(0)) fromBlock = BigInt(0)
       
       try {
         const chunkLogs = await ethereumPublicClient.getLogs({
@@ -162,8 +162,8 @@ async function getOnChainTransferLogs(
         break
       }
 
-      scannedBlocks += (toBlock - fromBlock + 1n)
-      toBlock = fromBlock - 1n
+      scannedBlocks += (toBlock - fromBlock + BigInt(1))
+      toBlock = fromBlock - BigInt(1)
       fromBlock = toBlock - CHUNK_SIZE
     }
 

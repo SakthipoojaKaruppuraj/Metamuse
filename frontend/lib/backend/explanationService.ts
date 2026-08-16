@@ -91,8 +91,8 @@ export async function generateExplanation(
 ): Promise<ExplanationPackage> {
   const apiKey = process.env.GEMINI_API_KEY
   
-  if (!apiKey) {
-    console.log('GEMINI_API_KEY is not configured. Using deterministic fallback explanation...')
+  if (!apiKey || apiKey.startsWith('your_') || apiKey.trim() === '') {
+    console.log('GEMINI_API_KEY is not configured or placeholder detected. Using deterministic fallback explanation...')
     return buildDeterministicFallback(nft, provenance, context)
   }
 

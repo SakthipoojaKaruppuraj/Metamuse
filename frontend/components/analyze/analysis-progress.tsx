@@ -18,6 +18,7 @@ export function AnalysisProgress({ openSeaUrl, onComplete, onError }: AnalysisPr
   const analysisIdRef = useRef<string | null>(null)
   const nftDataRef = useRef<any>(null)
   const errorRef = useRef<string | null>(null)
+  const hasTriggeredCallbackRef = useRef(false)
 
   // 1. Perform backend analysis request on mount
   useEffect(() => {
@@ -48,8 +49,8 @@ export function AnalysisProgress({ openSeaUrl, onComplete, onError }: AnalysisPr
             errorRef.current = userMsg
             isDoneRef.current = true
           } else {
-            analysisIdRef.current = data.analysisId
-            nftDataRef.current = data.nft
+            analysisIdRef.current = data.id || data.analysisId
+            nftDataRef.current = data
             isDoneRef.current = true
           }
         } catch (e) {
@@ -58,8 +59,8 @@ export function AnalysisProgress({ openSeaUrl, onComplete, onError }: AnalysisPr
           isDoneRef.current = true
         }
       } else {
-        // Mock Mode: Wait 3 seconds then resolve based on presets
-        await new Promise((r) => setTimeout(r, 3000))
+        // Mock Mode: Wait 2 seconds then resolve based on presets
+        await new Promise((r) => setTimeout(r, 2000))
         let mockId = 'example-genesis-1837'
         if (openSeaUrl.includes('721')) {
           mockId = 'example-collection-721'
@@ -76,37 +77,42 @@ export function AnalysisProgress({ openSeaUrl, onComplete, onError }: AnalysisPr
     // 2. Animate step-by-step progress
     function tick() {
       setActive((prev) => {
-        // If completed or failed, rush the progress steps to the end
         if (isDoneRef.current) {
           if (prev >= analysisSteps.length - 1) {
-            if (errorRef.current) {
-              onError(errorRef.current)
-            } else if (analysisIdRef.current) {
-              onComplete(analysisIdRef.current, nftDataRef.current)
-            }
             return prev
           }
-          activeTimer = setTimeout(tick, 200)
+          activeTimer = setTimeout(tick, 100)
           return prev + 1
         }
 
-        // Pause at stage 6 ("Calculating confidence") until backend resolves
         if (prev >= 6) {
-          activeTimer = setTimeout(tick, 300)
+          activeTimer = setTimeout(tick, 200)
           return prev
         }
 
-        activeTimer = setTimeout(tick, 600)
+        activeTimer = setTimeout(tick, 300)
         return prev + 1
       })
     }
 
-    activeTimer = setTimeout(tick, 600)
+    activeTimer = setTimeout(tick, 300)
 
     return () => {
       clearTimeout(activeTimer)
     }
-  }, [openSeaUrl, onComplete, onError])
+  }, [openSeaUrl])
+
+  // 3. Separate side effects from rendering/state updates to avoid React setState warning
+  useEffect(() => {
+    if (isDoneRef.current && active >= analysisSteps.length - 1 && !hasTriggeredCallbackRef.current) {
+      hasTriggeredCallbackRef.current = true
+      if (errorRef.current) {
+        onError(errorRef.current)
+      } else if (analysisIdRef.current) {
+        onComplete(analysisIdRef.current, nftDataRef.current)
+      }
+    }
+  }, [active, onComplete, onError])
 
   const progress = Math.min(
     100,
