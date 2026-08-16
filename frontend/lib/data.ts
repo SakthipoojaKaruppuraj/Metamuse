@@ -93,6 +93,17 @@ export interface NFT {
   }
 }
 
+export interface HistoryEntry {
+  id: string
+  collection: string
+  tokenId: string
+  network: string
+  image: string
+  analyzedOn: string
+  confidence: number
+  attested: boolean
+}
+
 // ----------------------------------------------------
 // PRESET A: Demo Genesis #1837
 // High confidence, Attested, Verification MATCH
