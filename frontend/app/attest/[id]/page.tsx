@@ -3,7 +3,7 @@
 import React, { useState, use, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { mockNFTs } from '@/lib/data'
+import { mockNFTs, type NFT } from '@/lib/data'
 import { useWallet } from '@/components/wallet/wallet-provider'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/surface'
@@ -24,10 +24,10 @@ import {
 
 const MOCK_ADDRESS = '0xA82c1D9e4F5b607182930a4B5c6d7e8f90A691F'
 
-
 export default function AttestPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const nft = mockNFTs[id]
+  const [nft, setNft] = useState<NFT | null>(null)
+  const [nftLoading, setNftLoading] = useState(true)
   const wallet = useWallet()
   const router = useRouter()
 
@@ -46,7 +46,45 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
   const [evidenceHash, setEvidenceHash] = useState('')
   const [provenanceHash, setProvenanceHash] = useState('')
 
-  // 1. First read-only test: read the latest on-chain attestation if it exists
+  // 1. Dynamic NFT loading strategy: Mock Presets -> LocalStorage -> Server API
+  useEffect(() => {
+    async function loadNftData() {
+      if (!id) return
+      
+      if (mockNFTs[id]) {
+        setNft(mockNFTs[id])
+        setNftLoading(false)
+        return
+      }
+
+      try {
+        const stored = localStorage.getItem(`nft:${id}`)
+        if (stored) {
+          setNft(JSON.parse(stored))
+          setNftLoading(false)
+          return
+        }
+      } catch (e) {
+        console.warn('Failed to parse from localStorage:', e)
+      }
+
+      try {
+        const res = await fetch(`/api/nft/details?id=${id}`)
+        if (res.ok) {
+          const data = await res.json()
+          setNft(data)
+        }
+      } catch (err) {
+        console.error('Failed to retrieve analysis from server:', err)
+      } finally {
+        setNftLoading(false)
+      }
+    }
+
+    loadNftData()
+  }, [id])
+
+  // 2. Read latest on-chain attestation details if available
   useEffect(() => {
     async function loadOnChainData() {
       if (!nft) return
@@ -62,7 +100,6 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
             setAttestor(data.attestor)
             setTimestamp(new Date(data.timestamp * 1000).toLocaleString())
             
-            // Sync with local NFT object so other pages reflect the on-chain status
             nft.attested = true
             nft.attestation = {
               network: 'Monad Testnet',
@@ -85,14 +122,26 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
         setLoading(false)
       }
     }
-    loadOnChainData()
+
+    if (nft) {
+      loadOnChainData()
+    }
   }, [nft])
+
+  if (nftLoading) {
+    return (
+      <div className="mx-auto max-w-xl px-4 py-24 text-center space-y-4">
+        <Loader2 className="size-8 text-primary animate-spin mx-auto" />
+        <p className="text-sm text-muted-foreground">Retrieving asset intelligence payload...</p>
+      </div>
+    )
+  }
 
   if (!nft) {
     return (
       <div className="mx-auto max-w-xl px-4 py-24 text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">NFT Audit Not Found</h1>
-        <p className="mt-2 text-sm text-muted-foreground">The requested NFT record does not exist.</p>
+        <p className="mt-2 text-sm text-muted-foreground">The requested NFT record does not exist or has expired.</p>
         <Button asChild className="mt-6">
           <Link href="/analyze">Back to Analyze</Link>
         </Button>
@@ -122,19 +171,17 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
     if (mode === 'real') {
       setAttestStatus('pending')
       try {
-        // Generate deterministic commitments
-        const commitments = generateDemoCommitments(nft)
-        
-        // Broadcast on-chain transaction
+        const evHash = nft.imageHash || generateDemoCommitments(nft).evidenceHash
+        const provHash = nft.metadataHash || generateDemoCommitments(nft).provenanceHash
+
         const receipt = await attestProvenance(
           nft.contract,
           nft.tokenId,
-          commitments.evidenceHash,
-          commitments.provenanceHash
+          evHash as `0x${string}`,
+          provHash as `0x${string}`
         )
 
         if (receipt.status === 'success') {
-          // Read transaction data back from Monad Contract
           const data = await getLatestAttestation(nft.contract, nft.tokenId)
           
           setTxHash(receipt.transactionHash)
@@ -145,7 +192,6 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
           setEvidenceHash(data.evidenceHash)
           setProvenanceHash(data.provenanceHash)
 
-          // Sync the mock data reference with actual blockchain data
           nft.attested = true
           nft.attestation = {
             network: 'Monad Testnet',
@@ -157,6 +203,10 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
             timestamp: new Date(data.timestamp * 1000).toLocaleDateString(),
             evidencePackage: `ipfs://QmEv1dence7Package9Hash2For8${nft.id}`
           }
+
+          try {
+            localStorage.setItem(`nft:${nft.id}`, JSON.stringify(nft))
+          } catch (e) {}
 
           setAttestStatus('confirmed')
         } else {
@@ -178,9 +228,8 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
         setAttestStatus('failed')
       }
     } else {
-      // Mock mode behavior
       setAttestStatus('pending')
-      await new Promise((r) => setTimeout(r, 1800)) // simulate Monad block inclusion
+      await new Promise((r) => setTimeout(r, 1800))
 
       if (simulateSuccess) {
         const mockHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
@@ -207,6 +256,10 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
           timestamp: new Date().toLocaleDateString(),
           evidencePackage: `ipfs://QmEv1dence7Package9Hash2For8${nft.id}`
         }
+
+        try {
+          localStorage.setItem(`nft:${nft.id}`, JSON.stringify(nft))
+        } catch (e) {}
       } else {
         setErrorMessage('Transaction cancelled in MetaMask.')
         setAttestStatus('failed')
@@ -214,14 +267,12 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
     }
   }
 
-  // Determine current active display state
   const isWalletConnected = wallet.status === 'connected' && wallet.address
   const isWrongNetwork = wallet.status === 'wrong-network'
   const isSwitchingNetwork = wallet.status === 'switching'
   const isConnecting = wallet.status === 'connecting'
   const isNoMetaMask = wallet.status === 'no-metamask'
 
-  // Build centralized explorer URL
   const viewTxUrl = txHash 
     ? `${MONAD_EXPLORER_URL}/tx/${txHash}` 
     : nft.attestation?.txHash 

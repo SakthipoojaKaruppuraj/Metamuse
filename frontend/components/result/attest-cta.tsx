@@ -82,7 +82,7 @@ export function AttestCta({ nft }: { nft: NFT }) {
           </p>
         </div>
         <Button size="lg" asChild className="lg:justify-self-end">
-          <Link href={`/attest?id=${nft.id}`}>
+          <Link href={`/attest/${nft.id}`}>
             Attest on Monad
             <ArrowRight className="size-4" />
           </Link>
