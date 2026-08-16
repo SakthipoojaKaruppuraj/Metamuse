@@ -1,0 +1,13 @@
+{
+  "contractName": "NFTProvenanceRegistry",
+  "network": "Monad Testnet",
+  "chainId": 10143,
+  "rpcUrl": "https://testnet-rpc.monad.xyz",
+  "contractAddress": "0xe0cb702a0702d33ee280bbce357e7ab54707b283",
+  "deploymentTxHash": "0x8ccedc3ebd5edb1a0303d98128209f208cc850a2ec67540bd5501774cca87262",
+  "latestAttestationTxHash": "0x143dc04d4bd45833d5228677b56af118d52fd75ff1e3aa92ac975975052290d5",
+  "explorerUrl": "https://monadvision.com/address/0xe0cb702a0702d33ee280bbce357e7ab54707b283",
+  "verified": true,
+  "abiFile": "NFTProvenanceRegistry.abi.json",
+  "sourceContract": "contract/src/NFTProvenanceRegistry.sol"
+}
