@@ -2,6 +2,10 @@
 
 > **Explains why an NFT exists and anchors the evidence behind that explanation on Monad.**
 
+- **Live Public Application**: [https://frontend-coral-pi-94.vercel.app](https://frontend-coral-pi-94.vercel.app)
+- **Monad Contract**: [`0xe0cb702a0702d33ee280bbce357e7ab54707b283`](https://monadvision.com/address/0xe0cb702a0702d33ee280bbce357e7ab54707b283)
+- **GitHub Repository**: [https://github.com/SakthipoojaKaruppuraj/Metamuse](https://github.com/SakthipoojaKaruppuraj/Metamuse)
+
 ---
 
 ## Table of Contents
