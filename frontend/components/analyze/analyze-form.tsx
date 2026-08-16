@@ -2,11 +2,11 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Link as LinkIcon, Hash, ArrowRight, Route, BookOpen, FileSearch } from 'lucide-react'
+import { Link as LinkIcon, Hash, ArrowRight, Route, BookOpen, FileSearch, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, Tabs } from '@/components/ui/surface'
 import { AnalysisProgress } from './analysis-progress'
-import { primaryNFT } from '@/lib/data'
+import { validateOpenSeaUrl } from '@/lib/utils'
 
 type Mode = 'idle' | 'loading'
 
@@ -35,15 +35,46 @@ export function AnalyzeForm() {
   const [url, setUrl] = useState('')
   const [contract, setContract] = useState('')
   const [tokenId, setTokenId] = useState('')
+  const [validationError, setValidationError] = useState('')
+  const [targetId, setTargetId] = useState('example-genesis-1837')
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
+    
+    if (tab === 'url') {
+      const check = validateOpenSeaUrl(url)
+      if (!check.isValid) {
+        setValidationError(check.error || 'Please enter a valid OpenSea NFT URL.')
+        return
+      }
+      setValidationError('')
+      setTargetId(check.id || 'example-genesis-1837')
+    } else {
+      if (!contract || !tokenId) {
+        setValidationError('Please fill in both Contract Address and Token ID.')
+        return
+      }
+      const hexRegex = /^0x[a-fA-F0-9]{40}$/
+      if (!hexRegex.test(contract)) {
+        setValidationError('Contract address must be a valid 40-character hex string (e.g. 0x...).')
+        return
+      }
+      setValidationError('')
+      
+      let id = 'example-genesis-1837'
+      if (contract.toLowerCase() === '0x8c7b4a2757279fc8291c2ea64a2757279fc829a2' || tokenId === '721') {
+        id = 'example-collection-721'
+      } else if (contract.toLowerCase() === '0x5f60789ac9012a64a27579fc8291c2791f9a79bc' || tokenId === '44') {
+        id = 'example-divergent-44'
+      }
+      setTargetId(id)
+    }
     setMode('loading')
   }
 
   if (mode === 'loading') {
     return (
-      <AnalysisProgress onComplete={() => router.push(`/nft/${primaryNFT.id}`)} />
+      <AnalysisProgress onComplete={() => router.push(`/nft/${targetId}`)} />
     )
   }
 
@@ -60,7 +91,10 @@ export function AnalyzeForm() {
         <div className="mt-5">
           <Tabs
             value={tab}
-            onValueChange={setTab}
+            onValueChange={(val) => {
+              setTab(val)
+              setValidationError('')
+            }}
             tabs={[
               { value: 'url', label: 'OpenSea URL' },
               { value: 'contract', label: 'Contract + Token ID' },
@@ -82,13 +116,16 @@ export function AnalyzeForm() {
                 <input
                   id="opensea-url"
                   value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://opensea.io/item/ethereum/..."
+                  onChange={(e) => {
+                    setUrl(e.target.value)
+                    if (validationError) setValidationError('')
+                  }}
+                  placeholder="https://opensea.io/assets/ethereum/0x7a3f2d79f9c0143891c2ea64a2757279fc8291c2/1837"
                   className="h-11 w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
                 />
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                Currently supported: OpenSea • Ethereum
+                Currently supported: OpenSea • Ethereum (Only ERC-721 supported for the MVP)
               </p>
             </div>
           ) : (
@@ -105,8 +142,11 @@ export function AnalyzeForm() {
                   <input
                     id="contract"
                     value={contract}
-                    onChange={(e) => setContract(e.target.value)}
-                    placeholder="0x7A3F...91C2"
+                    onChange={(e) => {
+                      setContract(e.target.value)
+                      if (validationError) setValidationError('')
+                    }}
+                    placeholder="0x7A3F4C9d2B8E1a05C6f3D9E2b7A1c4F5e6D091C2"
                     className="h-11 w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground"
                   />
                 </div>
@@ -121,22 +161,84 @@ export function AnalyzeForm() {
                 <input
                   id="token-id"
                   value={tokenId}
-                  onChange={(e) => setTokenId(e.target.value)}
+                  onChange={(e) => {
+                    setTokenId(e.target.value)
+                    if (validationError) setValidationError('')
+                  }}
                   placeholder="1837"
                   className="mt-2 h-11 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/20"
                 />
               </div>
               <p className="text-xs text-muted-foreground sm:col-span-2">
-                Network: Ethereum • ERC-721 support for the hackathon MVP.
+                Network: Ethereum • ERC-721 standard.
               </p>
             </div>
           )}
 
-          <Button type="submit" className="mt-5 h-11 px-5">
+          {validationError && (
+            <div className="mt-4 flex items-start gap-2 text-xs font-semibold text-destructive bg-destructive/5 border border-destructive/20 rounded-xl p-3 animate-fade-in">
+              <AlertCircle className="size-4 shrink-0 text-destructive mt-0.5" />
+              <span>{validationError}</span>
+            </div>
+          )}
+
+          <Button type="submit" className="mt-5 h-11 px-5 cursor-pointer">
             Analyze NFT
             <ArrowRight className="size-4" />
           </Button>
         </form>
+
+        {/* Try a demo presets */}
+        <div className="mt-8 border-t border-border pt-6">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Try a demo NFT</h3>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            {[
+              {
+                id: 'example-genesis-1837',
+                title: 'Demo Genesis #1837',
+                status: 'High confidence • Attested',
+                contract: '0x7A3F4C9d2B8E1a05C6f3D9E2b7A1c4F5e6D091C2',
+                tokenId: '1837',
+                url: 'https://opensea.io/assets/ethereum/0x7a3f2d79f9c0143891c2ea64a2757279fc8291c2/1837'
+              },
+              {
+                id: 'example-collection-721',
+                title: 'Lost Artifact #721',
+                status: 'Low confidence • Not attested',
+                contract: '0x8c7B4a2757279fC8291C2eA64a2757279fc829A2',
+                tokenId: '721',
+                url: 'https://opensea.io/assets/ethereum/0x8c7b4a2757279fc8291c2ea64a2757279fc829a2/721'
+              },
+              {
+                id: 'example-divergent-44',
+                title: 'Divergent Art #44',
+                status: 'Verification mismatch',
+                contract: '0x5F60789aC9012a64A27579fC8291C2791F9a79BC',
+                tokenId: '44',
+                url: 'https://opensea.io/assets/ethereum/0x5f60789ac9012a64a27579fc8291c2791f9a79bc/44'
+              }
+            ].map((p) => (
+              <button
+                type="button"
+                key={p.id}
+                onClick={() => {
+                  if (tab === 'url') {
+                    setUrl(p.url)
+                  } else {
+                    setContract(p.contract)
+                    setTokenId(p.tokenId)
+                  }
+                  setTargetId(p.id)
+                  setValidationError('')
+                }}
+                className="flex flex-col items-start gap-1 rounded-xl border border-border bg-card p-3 text-left hover:border-primary/50 hover:bg-secondary/40 transition-all cursor-pointer"
+              >
+                <span className="text-xs font-semibold text-foreground">{p.title}</span>
+                <span className="text-[10px] text-muted-foreground">{p.status}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </Card>
 
       <div>

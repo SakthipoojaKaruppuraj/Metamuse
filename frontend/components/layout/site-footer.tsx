@@ -5,8 +5,8 @@ const LINKS = [
   { href: '/analyze', label: 'Analyze' },
   { href: '/history', label: 'History' },
   { href: '/how-it-works', label: 'How It Works' },
-  { href: '#', label: 'GitHub', external: true },
-  { href: '#', label: 'Documentation', external: true },
+  { href: 'https://github.com/SakthipoojaKaruppuraj/Metamuse', label: 'GitHub', external: true },
+  { href: '/how-it-works', label: 'Documentation' },
 ]
 
 export function SiteFooter() {

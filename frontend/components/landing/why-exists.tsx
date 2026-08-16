@@ -49,8 +49,8 @@ export function WhyExists() {
             Why this NFT exists
           </p>
           <p className="mt-3 text-xl leading-relaxed text-foreground text-pretty">
-            This NFT belongs to Example Genesis, a digital identity collection
-            created to explore how ownership and identity can be represented
+            This NFT belongs to the MetaMuse Demo Genesis collection, a digital identity
+            set created to explore how ownership and identity can be represented
             through programmable digital art.
           </p>
           <p className="mt-5 text-sm font-medium text-muted-foreground">

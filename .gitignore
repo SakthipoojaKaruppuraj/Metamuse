@@ -5,6 +5,8 @@ frontend/node_modules/
 # Production builds
 dist/
 frontend/dist/
+.next/
+frontend/.next/
 
 # Environment configurations and keys
 .env

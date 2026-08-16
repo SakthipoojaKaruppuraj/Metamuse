@@ -55,7 +55,7 @@ export function WalletModal() {
                   className="h-10 w-full justify-center"
                   render={
                     <a
-                      href="#"
+                      href="https://testnet.monadexplorer.com"
                       target="_blank"
                       rel="noreferrer noopener"
                     />
