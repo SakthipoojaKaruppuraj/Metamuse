@@ -573,13 +573,14 @@ export const historyEntries: HistoryEntry[] = [
 ]
 
 export const analysisSteps = [
-  'NFT identified',
-  'Metadata retrieved',
+  'Parsing OpenSea URL',
+  'Fetching NFT metadata',
+  'Validating Ethereum identity',
+  'Resolving token metadata',
   'Reconstructing provenance',
-  'Analyzing artwork',
-  'Researching project context',
   'Collecting evidence',
-  'Generating explanation',
+  'Calculating confidence',
+  'Preparing explanation',
 ]
 
 export const primaryNFT = genesisNFT

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, use } from 'react'
+import React, { useState, use, useEffect } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { mockNFTs } from '@/lib/data'
@@ -15,6 +15,7 @@ import { AttestCta } from '@/components/result/attest-cta'
 import { EvidenceCard } from '@/components/evidence/evidence-card'
 import { Button } from '@/components/ui/button'
 import { SectionHeading } from '@/components/ui/section-heading'
+import { getAppMode } from '@/lib/config'
 import { 
   Sparkles, 
   ChevronDown, 
@@ -26,22 +27,76 @@ import {
   CheckCircle2, 
   Network,
   Image as ImageIcon,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react'
 
 export default function NFTResultPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const nft = mockNFTs[id]
+  const [nft, setNft] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [techOpen, setTechOpen] = useState(false)
   const [evidenceFilter, setEvidenceFilter] = useState<string>('all')
 
-  if (!nft) {
+  useEffect(() => {
+    async function loadNftData() {
+      const mode = getAppMode()
+      
+      // 1. Sandbox mock presets
+      if (mode === 'mock' && mockNFTs[id]) {
+        setNft(mockNFTs[id])
+        setLoading(false)
+        return
+      }
+
+      // 2. Client-side storage (Option A)
+      try {
+        const stored = localStorage.getItem(`nft:${id}`)
+        if (stored) {
+          setNft(JSON.parse(stored))
+          setLoading(false)
+          return
+        }
+      } catch (e) {
+        console.warn('Failed to parse from localStorage:', e)
+      }
+
+      // 3. Backend details API (Option B)
+      try {
+        const res = await fetch(`/api/nft/details?id=${id}`)
+        if (!res.ok) {
+          setError('NFT Audit Not Found')
+        } else {
+          const data = await res.json()
+          setNft(data)
+        }
+      } catch (err) {
+        setError('Failed to retrieve analysis from server.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadNftData()
+  }, [id])
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-xl px-4 py-24 text-center space-y-4">
+        <Loader2 className="size-8 text-primary animate-spin mx-auto" />
+        <p className="text-sm text-muted-foreground">Loading provenance analysis results...</p>
+      </div>
+    )
+  }
+
+  if (error || !nft) {
     return (
       <div className="mx-auto max-w-xl px-4 py-24 text-center">
         <div className="mx-auto w-12 h-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mb-4">
           <AlertCircle className="size-6" />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">NFT Audit Not Found</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{error || 'NFT Audit Not Found'}</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           The requested asset record does not exist in our registry database.
         </p>

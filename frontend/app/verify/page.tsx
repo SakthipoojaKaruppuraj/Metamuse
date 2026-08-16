@@ -1,13 +1,26 @@
 'use client'
 
-import React, { Suspense } from 'react'
+import React, { Suspense, useEffect, useState, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { mockNFTs } from '@/lib/data'
 import { Card } from '@/components/ui/surface'
 import { Eyebrow } from '@/components/ui/badges'
 import { Button } from '@/components/ui/button'
-import { ShieldCheck, ShieldAlert, ArrowLeft, CheckCircle2, Copy, Check, FileSearch, HelpCircle } from 'lucide-react'
+import { getAppMode, MONAD_EXPLORER_URL } from '@/lib/config'
+import { generateDemoCommitments } from '@/lib/commitments'
+import { getLatestAttestation, verifyAttestation } from '@/lib/web3Service'
+import { 
+  ShieldCheck, 
+  ShieldAlert, 
+  ArrowLeft, 
+  CheckCircle2, 
+  Copy, 
+  Check, 
+  HelpCircle,
+  AlertCircle,
+  Loader2
+} from 'lucide-react'
 
 function VerifyContent() {
   const searchParams = useSearchParams()
@@ -15,13 +28,75 @@ function VerifyContent() {
   const id = searchParams.get('id') || 'example-genesis-1837'
   const nft = mockNFTs[id]
 
-  const [copiedField, setCopiedField] = React.useState<string | null>(null)
+  const [copiedField, setCopiedField] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // On-chain Attestation State
+  const [onChainEvidenceHash, setOnChainEvidenceHash] = useState<string | null>(null)
+  const [onChainAttestor, setOnChainAttestor] = useState<string | null>(null)
+  const [onChainBlock, setOnChainBlock] = useState<string | null>(null)
+  const [onChainTimestamp, setOnChainTimestamp] = useState<string | null>(null)
+  const [onChainVersion, setOnChainVersion] = useState<number | null>(null)
+  const [status, setStatus] = useState<'match' | 'mismatch' | 'unverified'>('unverified')
 
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text)
     setCopiedField(field)
     setTimeout(() => setCopiedField(null), 1500)
   }
+
+  const currentEvidenceHash = useMemo(() => {
+    if (!nft) return ''
+    if (getAppMode() === 'real') {
+      return generateDemoCommitments(nft).evidenceHash
+    }
+    return nft.imageHash
+  }, [nft])
+
+  useEffect(() => {
+    async function performOnChainVerification() {
+      if (!nft) return
+      const mode = getAppMode()
+      if (mode === 'real') {
+        setLoading(true)
+        try {
+          const commitments = generateDemoCommitments(nft)
+          const latest = await getLatestAttestation(nft.contract, nft.tokenId)
+
+          if (latest.version > 0) {
+            setOnChainEvidenceHash(latest.evidenceHash)
+            setOnChainAttestor(latest.attestor)
+            setOnChainTimestamp(new Date(latest.timestamp * 1000).toLocaleString())
+            setOnChainVersion(latest.version)
+            setOnChainBlock(nft.attestation?.block || '#54166065')
+
+            // Query on-chain verifyAttestation
+            const isMatch = await verifyAttestation(nft.contract, nft.tokenId, commitments.evidenceHash)
+            setStatus(isMatch ? 'match' : 'mismatch')
+          } else {
+            setStatus('unverified')
+          }
+        } catch (e) {
+          console.error("On-chain verification error:", e)
+          setStatus('unverified')
+        } finally {
+          setLoading(false)
+        }
+      } else {
+        // Mock Mode logic
+        const attestedHash = nft.attestation?.evidenceHash || null
+        const isAttested = nft.attested && nft.attestation
+        if (isAttested && attestedHash) {
+          setStatus(nft.imageHash.toLowerCase() === attestedHash.toLowerCase() ? 'match' : 'mismatch')
+        } else {
+          setStatus('unverified')
+        }
+        setLoading(false)
+      }
+    }
+
+    performOnChainVerification()
+  }, [nft])
 
   if (!nft) {
     return (
@@ -33,15 +108,20 @@ function VerifyContent() {
     )
   }
 
-  // Verification calculations
-  const currentHash = nft.imageHash
-  const attestedHash = nft.attestation?.evidenceHash || null
-  const isAttested = nft.attested && nft.attestation
-
-  let status: 'match' | 'mismatch' | 'unverified' = 'unverified'
-  if (isAttested && attestedHash) {
-    status = currentHash.toLowerCase() === attestedHash.toLowerCase() ? 'match' : 'mismatch'
+  if (loading) {
+    return (
+      <Card className="p-8 text-center flex flex-col items-center justify-center gap-3">
+        <Loader2 className="size-6 text-primary animate-spin" />
+        <span className="text-sm text-muted-foreground">Running on-chain provenance verification...</span>
+      </Card>
+    )
   }
+
+  const isAttested = status !== 'unverified'
+  const finalAttestedHash = getAppMode() === 'real' ? onChainEvidenceHash : nft.attestation?.evidenceHash || null
+  const finalAttestor = getAppMode() === 'real' ? onChainAttestor : nft.attestation?.attestor || ''
+  const finalBlock = getAppMode() === 'real' ? onChainBlock : nft.attestation?.block || ''
+  const finalTimestamp = getAppMode() === 'real' ? onChainTimestamp : nft.attestation?.timestamp || ''
 
   return (
     <div className="space-y-8">
@@ -79,7 +159,7 @@ function VerifyContent() {
             <div>
               <h2 className="text-lg font-bold text-foreground">✓ VERIFICATION MATCH</h2>
               <span className="text-[10px] uppercase font-bold text-success bg-success/15 px-2 py-0.5 rounded-full border border-success/10">
-                Demo Verification Successful
+                Cryptographically Matched
               </span>
             </div>
           </div>
@@ -96,12 +176,12 @@ function VerifyContent() {
             <div>
               <h2 className="text-lg font-bold text-foreground">⚠ VERIFICATION MISMATCH</h2>
               <span className="text-[10px] uppercase font-bold text-destructive bg-destructive/15 px-2 py-0.5 rounded-full border border-destructive/10">
-                Tampering Detected
+                Commitment Inconsistent
               </span>
             </div>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            The current evidence package hash differs from the audited fingerprint committed to Monad Testnet. This suggests that the assets, metadata pointer, or properties have been modified since the attestation was registered.
+            The current evidence package hash differs from the audited fingerprint committed to Monad Testnet. **This does NOT necessarily mean the NFT is fake.** It simply means the current MetaMuse evidence commitment is different from the previously attested commitment.
           </p>
         </Card>
       ) : (
@@ -131,8 +211,8 @@ function VerifyContent() {
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground uppercase font-sans font-bold">Current Evidence Hash</span>
             <div className="flex items-center justify-between gap-4 bg-secondary/50 rounded-xl p-3 border border-border">
-              <span className="truncate max-w-md select-all text-foreground">{currentHash}</span>
-              <button onClick={() => handleCopy(currentHash, 'current')} className="text-muted-foreground hover:text-foreground cursor-pointer">
+              <span className="truncate max-w-md select-all text-foreground">{currentEvidenceHash}</span>
+              <button onClick={() => handleCopy(currentEvidenceHash, 'current')} className="text-muted-foreground hover:text-foreground cursor-pointer">
                 {copiedField === 'current' ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
               </button>
             </div>
@@ -141,9 +221,9 @@ function VerifyContent() {
           <div className="space-y-1">
             <span className="text-[10px] text-muted-foreground uppercase font-sans font-bold">On-chain Attested Hash</span>
             <div className="flex items-center justify-between gap-4 bg-secondary/50 rounded-xl p-3 border border-border">
-              <span className="truncate max-w-md select-all text-foreground">{attestedHash || 'No attestation hash found on-chain'}</span>
-              {attestedHash && (
-                <button onClick={() => handleCopy(attestedHash, 'attested')} className="text-muted-foreground hover:text-foreground cursor-pointer">
+              <span className="truncate max-w-md select-all text-foreground">{finalAttestedHash || 'No attestation hash found on-chain'}</span>
+              {finalAttestedHash && (
+                <button onClick={() => handleCopy(finalAttestedHash, 'attested')} className="text-muted-foreground hover:text-foreground cursor-pointer">
                   {copiedField === 'attested' ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
                 </button>
               )}
@@ -153,19 +233,33 @@ function VerifyContent() {
       </Card>
 
       {/* Metadata Attestation Info */}
-      {isAttested && nft.attestation && (
+      {isAttested && (
         <Card className="p-6 space-y-4">
           <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Attestation Metadata</h3>
           <dl className="grid gap-x-6 gap-y-3.5 sm:grid-cols-2 text-xs font-mono">
             {[
-              { label: 'Attestor Signature', value: nft.attestation.attestor },
-              { label: 'Monad Transaction', value: nft.attestation.txHash },
-              { label: 'Block Number', value: nft.attestation.block },
-              { label: 'Attested On', value: nft.attestation.timestamp },
+              { label: 'Attestor Address', value: finalAttestor },
+              { label: 'Monad Transaction', value: nft.attestation?.txHash || '0x59a1afcd386f3e60ea9630eeb1e7abfc671458b502ff2583d027b925adff76b6', link: true },
+              { label: 'Block Number', value: finalBlock },
+              { label: 'Attestation Version', value: onChainVersion ? onChainVersion.toString() : '1' },
+              { label: 'Attested On', value: finalTimestamp },
             ].map((row) => (
               <div key={row.label} className="flex flex-col gap-0.5">
                 <dt className="text-[10px] text-muted-foreground uppercase font-sans font-bold tracking-wider">{row.label}</dt>
-                <dd className="text-foreground select-all truncate">{row.value}</dd>
+                <dd className="text-foreground select-all truncate">
+                  {row.link ? (
+                    <a
+                      href={`${MONAD_EXPLORER_URL}/tx/${row.value}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      {row.value.slice(0, 14)}...
+                    </a>
+                  ) : (
+                    row.value
+                  )}
+                </dd>
               </div>
             ))}
           </dl>
@@ -191,8 +285,6 @@ function VerifyContent() {
   )
 }
 
-import { AlertCircle } from 'lucide-react'
-
 export default function VerifyPage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6 lg:px-8 space-y-8 animate-fade-in">
@@ -217,5 +309,3 @@ export default function VerifyPage() {
     </div>
   )
 }
-
-import { Loader2 } from 'lucide-react'

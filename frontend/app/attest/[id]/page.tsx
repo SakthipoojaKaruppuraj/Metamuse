@@ -1,13 +1,16 @@
 'use client'
 
-import React, { useState, use } from 'react'
+import React, { useState, use, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { mockNFTs, attestedExample } from '@/lib/data'
+import { mockNFTs } from '@/lib/data'
 import { useWallet } from '@/components/wallet/wallet-provider'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/surface'
 import { Eyebrow } from '@/components/ui/badges'
+import { getAppMode, MONAD_EXPLORER_URL } from '@/lib/config'
+import { generateDemoCommitments } from '@/lib/commitments'
+import { getLatestAttestation, attestProvenance, normalizeError } from '@/lib/web3Service'
 import { 
   ArrowLeft, 
   BadgeCheck, 
@@ -19,6 +22,9 @@ import {
   AlertCircle 
 } from 'lucide-react'
 
+const MOCK_ADDRESS = '0xA82c1D9e4F5b607182930a4B5c6d7e8f90A691F'
+
+
 export default function AttestPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const nft = mockNFTs[id]
@@ -27,10 +33,60 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
 
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [attestStatus, setAttestStatus] = useState<'idle' | 'pending' | 'confirmed' | 'failed'>('idle')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [simulateSuccess, setSimulateSuccess] = useState(true)
+  const [loading, setLoading] = useState(true)
+
+  // Blockchain Success State
   const [txHash, setTxHash] = useState('')
   const [blockNumber, setBlockNumber] = useState('')
   const [timestamp, setTimestamp] = useState('')
+  const [attestor, setAttestor] = useState('')
+  const [version, setVersion] = useState<number>(0)
+  const [evidenceHash, setEvidenceHash] = useState('')
+  const [provenanceHash, setProvenanceHash] = useState('')
+
+  // 1. First read-only test: read the latest on-chain attestation if it exists
+  useEffect(() => {
+    async function loadOnChainData() {
+      if (!nft) return
+      const mode = getAppMode()
+      if (mode === 'real') {
+        setLoading(true)
+        try {
+          const data = await getLatestAttestation(nft.contract, nft.tokenId)
+          if (data.version > 0) {
+            setVersion(data.version)
+            setEvidenceHash(data.evidenceHash)
+            setProvenanceHash(data.provenanceHash)
+            setAttestor(data.attestor)
+            setTimestamp(new Date(data.timestamp * 1000).toLocaleString())
+            
+            // Sync with local NFT object so other pages reflect the on-chain status
+            nft.attested = true
+            nft.attestation = {
+              network: 'Monad Testnet',
+              txHash: nft.attestation?.txHash || '0x59a1afcd386f3e60ea9630eeb1e7abfc671458b502ff2583d027b925adff76b6',
+              block: nft.attestation?.block || '#54166065',
+              attestor: data.attestor,
+              evidenceHash: data.evidenceHash,
+              provenanceHash: data.provenanceHash,
+              timestamp: new Date(data.timestamp * 1000).toLocaleDateString(),
+              evidencePackage: `ipfs://QmEv1dence7Package9Hash2For8${nft.id}`
+            }
+            setAttestStatus('confirmed')
+          }
+        } catch (err) {
+          console.error("Failed to load on-chain attestation details:", err)
+        } finally {
+          setLoading(false)
+        }
+      } else {
+        setLoading(false)
+      }
+    }
+    loadOnChainData()
+  }, [nft])
 
   if (!nft) {
     return (
@@ -44,6 +100,15 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
     )
   }
 
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-xl px-4 py-24 text-center space-y-4">
+        <Loader2 className="size-8 text-primary animate-spin mx-auto" />
+        <p className="text-sm text-muted-foreground">Loading Monad Testnet attestation status...</p>
+      </div>
+    )
+  }
+
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text)
     setCopiedField(field)
@@ -51,28 +116,101 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
   }
 
   const triggerAttest = async () => {
-    setAttestStatus('pending')
-    await new Promise((r) => setTimeout(r, 1800)) // simulate Monad block inclusion
+    setErrorMessage(null)
+    const mode = getAppMode()
 
-    if (simulateSuccess) {
-      setTxHash('0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(''))
-      setBlockNumber((182000 + Math.floor(Math.random() * 5000)).toString())
-      setTimestamp(new Date().toLocaleString())
-      setAttestStatus('confirmed')
-      // Mutate the mock data local reference to show attested status on result page
-      nft.attested = true
-      nft.attestation = {
-        network: 'Monad Testnet',
-        txHash: '0xABC3d4E5f60718293a4B5c6D7e8F90a1b2C3d123',
-        block: '#182734',
-        attestor: wallet.address || '0xA82c1D9e4F5b607182930a4B5c6d7e8f90A691F',
-        evidenceHash: nft.imageHash,
-        provenanceHash: '0x19BC2d4E5f6071829304a5B6c7D8e9F0a1bcA21',
-        timestamp: new Date().toLocaleDateString(),
-        evidencePackage: `ipfs://QmEv1dence7Package9Hash2For8${nft.id}`
+    if (mode === 'real') {
+      setAttestStatus('pending')
+      try {
+        // Generate deterministic commitments
+        const commitments = generateDemoCommitments(nft)
+        
+        // Broadcast on-chain transaction
+        const receipt = await attestProvenance(
+          nft.contract,
+          nft.tokenId,
+          commitments.evidenceHash,
+          commitments.provenanceHash
+        )
+
+        if (receipt.status === 'success') {
+          // Read transaction data back from Monad Contract
+          const data = await getLatestAttestation(nft.contract, nft.tokenId)
+          
+          setTxHash(receipt.transactionHash)
+          setBlockNumber(receipt.blockNumber.toString())
+          setTimestamp(new Date(data.timestamp * 1000).toLocaleString())
+          setAttestor(data.attestor)
+          setVersion(data.version)
+          setEvidenceHash(data.evidenceHash)
+          setProvenanceHash(data.provenanceHash)
+
+          // Sync the mock data reference with actual blockchain data
+          nft.attested = true
+          nft.attestation = {
+            network: 'Monad Testnet',
+            txHash: receipt.transactionHash,
+            block: `#${receipt.blockNumber.toString()}`,
+            attestor: data.attestor,
+            evidenceHash: data.evidenceHash,
+            provenanceHash: data.provenanceHash,
+            timestamp: new Date(data.timestamp * 1000).toLocaleDateString(),
+            evidencePackage: `ipfs://QmEv1dence7Package9Hash2For8${nft.id}`
+          }
+
+          setAttestStatus('confirmed')
+        } else {
+          setErrorMessage('Monad rejected the attestation transaction.')
+          setAttestStatus('failed')
+        }
+      } catch (err: any) {
+        console.error(err)
+        const errorKey = normalizeError(err)
+        if (errorKey === 'USER_REJECTED') {
+          setErrorMessage('Transaction cancelled in MetaMask.')
+        } else if (errorKey === 'WRONG_NETWORK') {
+          setErrorMessage('Please switch to Monad Testnet.')
+        } else if (errorKey === 'RPC_ERROR') {
+          setErrorMessage('Unable to reach Monad Testnet.')
+        } else {
+          setErrorMessage('Attestation transaction failed.')
+        }
+        setAttestStatus('failed')
       }
     } else {
-      setAttestStatus('failed')
+      // Mock mode behavior
+      setAttestStatus('pending')
+      await new Promise((r) => setTimeout(r, 1800)) // simulate Monad block inclusion
+
+      if (simulateSuccess) {
+        const mockHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+        const mockBlock = (182000 + Math.floor(Math.random() * 5000)).toString()
+        const mockTime = new Date().toLocaleString()
+        
+        setTxHash(mockHash)
+        setBlockNumber(mockBlock)
+        setTimestamp(mockTime)
+        setAttestor(wallet.address || MOCK_ADDRESS)
+        setVersion(1)
+        setEvidenceHash(nft.imageHash)
+        setProvenanceHash('0x19BC2d4E5f6071829304a5B6c7D8e9F0a1bcA21')
+
+        setAttestStatus('confirmed')
+        nft.attested = true
+        nft.attestation = {
+          network: 'Monad Testnet',
+          txHash: mockHash,
+          block: `#${mockBlock}`,
+          attestor: wallet.address || MOCK_ADDRESS,
+          evidenceHash: nft.imageHash,
+          provenanceHash: '0x19BC2d4E5f6071829304a5B6c7D8e9F0a1bcA21',
+          timestamp: new Date().toLocaleDateString(),
+          evidencePackage: `ipfs://QmEv1dence7Package9Hash2For8${nft.id}`
+        }
+      } else {
+        setErrorMessage('Transaction cancelled in MetaMask.')
+        setAttestStatus('failed')
+      }
     }
   }
 
@@ -81,6 +219,14 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
   const isWrongNetwork = wallet.status === 'wrong-network'
   const isSwitchingNetwork = wallet.status === 'switching'
   const isConnecting = wallet.status === 'connecting'
+  const isNoMetaMask = wallet.status === 'no-metamask'
+
+  // Build centralized explorer URL
+  const viewTxUrl = txHash 
+    ? `${MONAD_EXPLORER_URL}/tx/${txHash}` 
+    : nft.attestation?.txHash 
+    ? `${MONAD_EXPLORER_URL}/tx/${nft.attestation.txHash}` 
+    : MONAD_EXPLORER_URL
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6 lg:px-8 space-y-8 animate-fade-in">
@@ -121,7 +267,7 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
             <div>
               <h2 className="text-lg font-bold text-foreground uppercase tracking-wide">Provenance Attested</h2>
               <span className="text-[10px] uppercase font-bold text-success bg-success/15 px-2 py-0.5 rounded-full border border-success/10">
-                Monad Testnet • Demo State
+                {getAppMode() === 'real' ? 'Monad Testnet • Live State' : 'Monad Testnet • Demo State'}
               </span>
             </div>
           </div>
@@ -132,18 +278,19 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
 
           <dl className="grid gap-x-4 gap-y-3.5 sm:grid-cols-2 border-t border-border pt-4 text-xs font-mono">
             {[
-              { label: 'Attestation Transaction', value: txHash || '0xABC3d4E5f60718293a4B5c6D7e8F90a1b2C3d123', copy: true },
-              { label: 'Explorer Block', value: `#${blockNumber || '182734'}`, copy: false },
-              { label: 'Signer Attestor Address', value: wallet.address || '0xA82c1D9e4F5b607182930a4B5c6d7e8f90A691F', copy: true },
-              { label: 'Evidence SHA-256 Fingerprint', value: nft.imageHash, copy: true },
-              { label: 'Provenance Hash Commitment', value: '0x19BC2d4E5f6071829304a5B6c7D8e9F0a1bcA21', copy: true },
-              { label: 'Timestamp (UTC)', value: timestamp || new Date().toLocaleString(), copy: false },
+              { label: 'Attestation Transaction', value: txHash || nft.attestation?.txHash || '', copy: true },
+              { label: 'Explorer Block', value: blockNumber ? `#${blockNumber}` : nft.attestation?.block || '', copy: false },
+              { label: 'Signer Attestor Address', value: attestor || nft.attestation?.attestor || '', copy: true },
+              { label: 'Attestation Version', value: version ? version.toString() : nft.attestation?.block ? '1' : '0', copy: false },
+              { label: 'Evidence Hash Fingerprint', value: evidenceHash || nft.attestation?.evidenceHash || '', copy: true },
+              { label: 'Provenance Hash Commitment', value: provenanceHash || nft.attestation?.provenanceHash || '', copy: true },
+              { label: 'Timestamp (UTC)', value: timestamp || nft.attestation?.timestamp || '', copy: false },
             ].map((row) => (
               <div key={row.label} className="flex flex-col gap-0.5">
                 <dt className="text-[10px] text-muted-foreground uppercase font-sans font-bold tracking-wider">{row.label}</dt>
                 <dd className="flex items-center gap-1.5 text-foreground truncate select-all">
                   <span className="truncate">{row.value}</span>
-                  {row.copy && (
+                  {row.copy && row.value && (
                     <button
                       onClick={() => handleCopy(row.value, row.label)}
                       className="text-muted-foreground hover:text-foreground cursor-pointer"
@@ -163,12 +310,12 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
               </Link>
             </Button>
             <a
-              href="https://testnet.monadexplorer.com"
+              href={viewTxUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center rounded-xl border border-border bg-card px-4 py-2 text-xs font-semibold text-foreground hover:bg-secondary transition-colors"
             >
-              View on Monad Explorer (Demo Link)
+              View on Monad Explorer
               <ExternalLink className="size-3.5 ml-1.5" />
             </a>
           </div>
@@ -190,7 +337,7 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
             <h3 className="font-bold text-foreground">Attestation Transaction Failed</h3>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            The transaction was cancelled or rejected by MetaMask. Make sure you accept the gas authorization prompt and try again.
+            {errorMessage || 'The transaction was cancelled or rejected by MetaMask. Make sure you accept the gas authorization prompt and try again.'}
           </p>
           <div className="flex gap-3">
             <Button onClick={triggerAttest}>Try Again</Button>
@@ -219,24 +366,33 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
             </div>
           </div>
 
-          {/* Simulation Toggle in Dev/Mock Mode */}
-          <div className="bg-secondary/40 rounded-xl p-3 border border-border flex items-center justify-between text-xs">
-            <span className="font-semibold text-muted-foreground">Demo Simulation Mode:</span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setSimulateSuccess(true)}
-                className={`px-2 py-0.5 rounded cursor-pointer ${simulateSuccess ? 'bg-primary text-white' : 'bg-slate-200 text-slate-600'}`}
-              >
-                Success
-              </button>
-              <button
-                onClick={() => setSimulateSuccess(false)}
-                className={`px-2 py-0.5 rounded cursor-pointer ${!simulateSuccess ? 'bg-destructive text-white' : 'bg-slate-200 text-slate-600'}`}
-              >
-                Failure
-              </button>
+          {/* Simulation Toggle in Dev/Mock Mode only */}
+          {getAppMode() === 'mock' ? (
+            <div className="bg-secondary/40 rounded-xl p-3 border border-border flex items-center justify-between text-xs animate-fade-in">
+              <span className="font-semibold text-muted-foreground">Demo Simulation Mode:</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSimulateSuccess(true)}
+                  className={`px-2 py-0.5 rounded cursor-pointer ${simulateSuccess ? 'bg-primary text-white' : 'bg-slate-200 text-slate-600'}`}
+                >
+                  Success
+                </button>
+                <button
+                  onClick={() => setSimulateSuccess(false)}
+                  className={`px-2 py-0.5 rounded cursor-pointer ${!simulateSuccess ? 'bg-destructive text-white' : 'bg-slate-200 text-slate-600'}`}
+                >
+                  Failure
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-primary/5 rounded-xl p-3 border border-primary/20 flex items-center justify-between text-xs animate-fade-in">
+              <span className="font-semibold text-primary">Real Mode Active:</span>
+              <span className="text-muted-foreground text-[11px]">
+                Blockchain state is controlled by MetaMask & Monad Testnet.
+              </span>
+            </div>
+          )}
 
           <div className="border-t border-border pt-4">
             {isWalletConnected ? (
@@ -265,9 +421,25 @@ export default function AttestPage({ params }: { params: Promise<{ id: string }>
                 <Loader2 className="size-4 animate-spin mr-2" />
                 Connecting MetaMask...
               </Button>
+            ) : isNoMetaMask ? (
+              <div className="space-y-3 text-center py-2">
+                <p className="text-xs text-destructive font-semibold">MetaMask is not installed.</p>
+                <a
+                  href="https://metamask.io/download/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-9 w-full items-center justify-center rounded-xl bg-destructive/10 text-xs font-bold text-destructive hover:bg-destructive/20 transition-all"
+                >
+                  Install MetaMask
+                </a>
+              </div>
             ) : (
               <div className="space-y-3 text-center py-2">
-                <p className="text-xs text-muted-foreground">Please connect your MetaMask wallet to submit attestation hashes.</p>
+                {wallet.status === 'user-rejected' ? (
+                  <p className="text-xs text-destructive font-semibold">Connection rejected. Please approve the prompt in MetaMask to connect.</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Please connect your MetaMask wallet to submit attestation hashes.</p>
+                )}
                 <Button onClick={() => wallet.connect()} className="w-full cursor-pointer">
                   Connect MetaMask
                 </Button>

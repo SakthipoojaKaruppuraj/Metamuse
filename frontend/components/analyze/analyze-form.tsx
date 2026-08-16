@@ -37,6 +37,7 @@ export function AnalyzeForm() {
   const [tokenId, setTokenId] = useState('')
   const [validationError, setValidationError] = useState('')
   const [targetId, setTargetId] = useState('example-genesis-1837')
+  const [activeUrl, setActiveUrl] = useState('')
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -49,6 +50,7 @@ export function AnalyzeForm() {
       }
       setValidationError('')
       setTargetId(check.id || 'example-genesis-1837')
+      setActiveUrl(url)
     } else {
       if (!contract || !tokenId) {
         setValidationError('Please fill in both Contract Address and Token ID.')
@@ -68,13 +70,30 @@ export function AnalyzeForm() {
         id = 'example-divergent-44'
       }
       setTargetId(id)
+      setActiveUrl(`https://opensea.io/assets/ethereum/${contract.toLowerCase()}/${tokenId}`)
     }
     setMode('loading')
   }
 
+  const handleComplete = (analysisId: string, nftData: any) => {
+    if (nftData) {
+      localStorage.setItem(`nft:${analysisId}`, JSON.stringify(nftData))
+    }
+    router.push(`/nft/${analysisId}`)
+  }
+
+  const handleError = (errorMsg: string) => {
+    setValidationError(errorMsg)
+    setMode('idle')
+  }
+
   if (mode === 'loading') {
     return (
-      <AnalysisProgress onComplete={() => router.push(`/nft/${targetId}`)} />
+      <AnalysisProgress 
+        openSeaUrl={activeUrl}
+        onComplete={handleComplete}
+        onError={handleError}
+      />
     )
   }
 
