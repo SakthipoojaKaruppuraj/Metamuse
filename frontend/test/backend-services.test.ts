@@ -81,16 +81,16 @@ test('Memory Cache Tests', async (t) => {
 
 test('Evidence Service Tests', async (t) => {
   await t.test('should calculate confidence scores correctly', () => {
-    // Max score is 100
-    const maxScore = calculateConfidence(true, true, true, true, true, true)
+    // Max score is 100 (all 7 parameters true)
+    const maxScore = calculateConfidence(true, true, true, true, true, true, true)
     assert.strictEqual(maxScore, 100)
 
     // Score with only code and metadata (25 + 20 = 45)
-    const basicScore = calculateConfidence(true, true, false, false, false, false)
+    const basicScore = calculateConfidence(true, true, false, false, false, false, false)
     assert.strictEqual(basicScore, 45)
 
     // Score with no indicators (0)
-    const zeroScore = calculateConfidence(false, false, false, false, false, false)
+    const zeroScore = calculateConfidence(false, false, false, false, false, false, false)
     assert.strictEqual(zeroScore, 0)
   })
 

@@ -1,4 +1,5 @@
 import { keccak256, stringToHex } from 'viem'
+import type { ContextClaim, ContextSource } from './contextService'
 
 export interface EvidenceSource {
   id: string
@@ -45,18 +46,30 @@ export interface EvidencePackage {
     owner: string
   }
   sources: EvidenceSource[]
+  contextClaims?: ContextClaim[]
+  contextSources?: ContextSource[]
+  explanationClaims?: any[]
 }
 
 /**
  * Calculates MetaMuse Evidence Confidence score (0 to 100).
+ * Based on updated weight parameters:
+ * - On-chain contract validation: 25
+ * - Metadata: 20
+ * - Mint: 20
+ * - Transfers: 15
+ * - Collection context: 10
+ * - Creator evidence: 5
+ * - Official source: 5
  */
 export function calculateConfidence(
   hasOnChainCode: boolean,
   hasMetadata: boolean,
   hasMint: boolean,
   hasTransfers: boolean,
-  hasCreator: boolean,
-  hasCollection: boolean
+  hasCollectionContext: boolean,
+  hasCreatorEvidence: boolean,
+  hasOfficialSource: boolean
 ): number {
   let score = 0
 
@@ -64,8 +77,9 @@ export function calculateConfidence(
   if (hasMetadata) score += 20
   if (hasMint) score += 20
   if (hasTransfers) score += 15
-  if (hasCreator) score += 10
-  if (hasCollection) score += 10
+  if (hasCollectionContext) score += 10
+  if (hasCreatorEvidence) score += 5
+  if (hasOfficialSource) score += 5
 
   return score
 }
@@ -85,14 +99,23 @@ export function generateExplanation(
   const shortMinter = minter ? `${minter.slice(0, 6)}...${minter.slice(-4)}` : 'Unknown minter'
   const shortOwner = `${ownerAddress.slice(0, 6)}...${ownerAddress.slice(-4)}`
 
-  return `This NFT belongs to the ${collectionName} collection.[E1] On-chain verification confirms it exists on Ethereum at contract ${shortContract} under token ID ${tokenId}.[E2] Reconstructed transaction history reveals the token was initially minted by ${shortMinter} and has since been transferred ${transferCount} times to its current owner ${shortOwner}.[E3]`
+  return `This NFT belongs to the ${collectionName} collection.[1] On-chain verification confirms it exists on Ethereum at contract ${shortContract} under token ID ${tokenId}.[2] Reconstructed transaction history reveals the token was initially minted by ${shortMinter} [2] and has since been transferred ${transferCount} times to its current owner ${shortOwner}.[2]`
 }
 
 /**
  * Deterministically serializes the evidence package.
+ * Sorts sources, claims, and other arrays to ensure identical hashing regardless of runtime ordering.
  */
 export function canonicalizeEvidence(evidence: EvidencePackage): string {
   const sortedSources = [...evidence.sources].sort((a, b) => a.id.localeCompare(b.id))
+  
+  const sortedContextClaims = evidence.contextClaims 
+    ? [...evidence.contextClaims].sort((a, b) => a.id.localeCompare(b.id))
+    : []
+    
+  const sortedContextSources = evidence.contextSources
+    ? [...evidence.contextSources].sort((a, b) => a.id.localeCompare(b.id))
+    : []
   
   const canonicalObj = {
     schemaVersion: evidence.schemaVersion,
@@ -108,6 +131,21 @@ export function canonicalizeEvidence(evidence: EvidencePackage): string {
       title: s.title,
       url: s.url,
     })),
+    contextClaims: sortedContextClaims.map((c) => ({
+      id: c.id,
+      text: c.text,
+      type: c.type,
+      sourceIds: [...c.sourceIds].sort(),
+      confidence: c.confidence,
+    })),
+    contextSources: sortedContextSources.map((s) => ({
+      id: s.id,
+      title: s.title,
+      url: s.url,
+      sourceType: s.sourceType,
+      publisher: s.publisher,
+      confidence: s.confidence,
+    }))
   }
   
   return JSON.stringify(canonicalObj)

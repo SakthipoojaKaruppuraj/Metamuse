@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { parseOpenSeaUrl } from '@/lib/backend/urlParser'
-import { getNFT } from '@/lib/backend/openseaService'
+import { getNFT, type NFTAsset } from '@/lib/backend/openseaService'
 import { 
   validateContractCode, 
   getOwnerOf, 
@@ -8,10 +8,11 @@ import {
   fetchTokenMetadataFromURI,
   resolveAssetUrl
 } from '@/lib/backend/ethereumService'
-import { reconstructProvenance } from '@/lib/backend/provenanceService'
+import { reconstructProvenance, type ProvenanceRecord } from '@/lib/backend/provenanceService'
+import { extractContext, type ContextPackage, type ContextClaim, type ContextSource } from '@/lib/backend/contextService'
+import { generateExplanation, type ExplanationPackage } from '@/lib/backend/explanationService'
 import { 
   calculateConfidence, 
-  generateExplanation, 
   generateEvidenceHash, 
   generateProvenanceHash,
   type EvidenceSource,
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
     const { contractAddress, tokenId } = parsed.data
 
     // 2. Fetch OpenSea Data
-    let openseaAsset
+    let openseaAsset: NFTAsset
     try {
       openseaAsset = await getNFT(contractAddress, tokenId)
     } catch (err: any) {
@@ -42,7 +43,6 @@ export async function POST(request: Request) {
       if (errorMsg === 'OPENSEA_UNAUTHORIZED' || errorMsg === 'OPENSEA_RATE_LIMITED' || errorMsg === 'NFT_NOT_FOUND') {
         return NextResponse.json({ error: errorMsg }, { status: 400 })
       }
-      // General OpenSea error code
       return NextResponse.json({ error: 'OPENSEA_ERROR' }, { status: 500 })
     }
 
@@ -63,12 +63,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'OWNER_OF_FAILED' }, { status: 400 })
     }
 
-    // Attempt tokenURI resolution fallback if metadata needs verification
-    let fallbackMetadata: any = null
     let metadataFetched = false
     if (rpcTokenUri) {
       try {
-        fallbackMetadata = await fetchTokenMetadataFromURI(rpcTokenUri)
+        await fetchTokenMetadataFromURI(rpcTokenUri)
         metadataFetched = true
       } catch (e) {
         console.warn('EVM tokenURI metadata fetch failed:', e)
@@ -76,29 +74,31 @@ export async function POST(request: Request) {
     }
 
     // 4. Reconstruct Provenance
-    const collectionCreator = openseaAsset.collection.slug // OpenSea doesn't give address, we fallback
     const provenanceRecord = await reconstructProvenance(
       contractAddress,
       tokenId,
       canonicalOwner,
-      undefined // We can enrich this if creator address is resolved from mint
+      undefined
     )
 
     const minterAddress = provenanceRecord.mint.minter
 
-    // 5. Assemble Evidence Package (schemaVersion: 1)
+    // 5. Extract Context
+    const contextPackage = await extractContext(openseaAsset, provenanceRecord)
+
+    // 6. Build Core Evidence Package (schemaVersion: 1)
     const sources: EvidenceSource[] = [
       {
-        id: 'E1',
-        type: 'COLLECTION',
+        id: 'ev-1',
+        type: 'metadata',
         title: 'OpenSea Collection Info',
         url: openseaAsset.openseaUrl,
         sourceClass: 'OPENSEA',
         confidence: 'SOURCE-BACKED',
       },
       {
-        id: 'E2',
-        type: 'ON_CHAIN',
+        id: 'ev-2',
+        type: 'on-chain',
         title: 'EVM Contract Code Registry',
         url: `https://etherscan.io/address/${contractAddress}`,
         sourceClass: 'ON_CHAIN',
@@ -108,12 +108,25 @@ export async function POST(request: Request) {
 
     if (provenanceRecord.mint.transactionHash) {
       sources.push({
-        id: 'E3',
-        type: 'ON_CHAIN',
+        id: 'ev-3',
+        type: 'on-chain',
         title: 'NFT Mint Transaction Log',
         url: `https://etherscan.io/tx/${provenanceRecord.mint.transactionHash}`,
         sourceClass: 'ON_CHAIN',
         confidence: 'VERIFIED',
+      })
+    }
+
+    // If official website is present in context sources
+    const officialSiteSource = contextPackage.sources.find(s => s.sourceType === 'OFFICIAL_PROJECT')
+    if (officialSiteSource) {
+      sources.push({
+        id: 'ev-4',
+        type: 'project',
+        title: officialSiteSource.title,
+        url: officialSiteSource.url,
+        sourceClass: 'PROJECT',
+        confidence: 'SOURCE-BACKED',
       })
     }
 
@@ -153,41 +166,38 @@ export async function POST(request: Request) {
         owner: canonicalOwner,
       },
       sources,
+      contextClaims: contextPackage.claims,
+      contextSources: contextPackage.sources,
     }
 
-    // 6. Generate Hashes (bytes32 commitments)
-    const evidenceHash = generateEvidenceHash(evidencePackage)
-    const provenanceHash = generateProvenanceHash(provenanceRecord)
+    // 7. Generate Explanations via Service
+    const explanation = await generateExplanation(
+      openseaAsset,
+      provenanceRecord,
+      contextPackage,
+      evidencePackage
+    )
 
-    // 7. Calculate Confidence & Explanations
-    const confidence = calculateConfidence(
+    // 8. Calculate Confidence Score
+    const hasCollectionContext = !!openseaAsset.collection.name && contextPackage.claims.some(c => c.type === 'PROJECT_PURPOSE' && c.confidence !== 'UNKNOWN')
+    const hasCreatorEvidence = provenanceRecord.creatorCandidates.some(c => c.confidence === 'VERIFIED' || c.confidence === 'SOURCE-BACKED')
+    const hasOfficialSource = !!officialSiteSource
+
+    const confidenceScore = calculateConfidence(
       hasContractCode,
       metadataFetched || !!openseaAsset.image,
       !!provenanceRecord.mint.transactionHash,
       provenanceRecord.transfers.length > 0,
-      provenanceRecord.creatorCandidates.length > 0,
-      !!openseaAsset.collection.name
+      hasCollectionContext,
+      hasCreatorEvidence,
+      hasOfficialSource
     )
 
-    const explanation = generateExplanation(
-      openseaAsset.collection.name,
-      contractAddress,
-      tokenId,
-      minterAddress,
-      provenanceRecord.transfers.filter(t => t.type === 'TRANSFER').length,
-      canonicalOwner
-    )
+    // 9. Generate Hashes (bytes32 commitments)
+    const evidenceHash = generateEvidenceHash(evidencePackage)
+    const provenanceHash = generateProvenanceHash(provenanceRecord)
 
-    // Helper to calculate date format
-    const mintDateStr = provenanceRecord.mint.timestamp 
-      ? new Date(provenanceRecord.mint.timestamp * 1000).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric'
-        })
-      : 'Unknown Date'
-
-    // Format visual and metadata traits lists
+    // 10. Format visual and metadata traits lists
     const visualTraits = openseaAsset.traits.slice(0, 4).map(t => ({
       label: t.trait_type,
       value: t.value.toString()
@@ -197,12 +207,20 @@ export async function POST(request: Request) {
       value: t.value.toString()
     }))
 
-    // Build the dynamic UI elements
-    const frontendEvidence: EvidenceItem[] = sources.map((s, index) => ({
+    // 11. Format visual elements for page rendering
+    const mintDateStr = provenanceRecord.mint.timestamp 
+      ? new Date(provenanceRecord.mint.timestamp * 1000).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric'
+        })
+      : 'Unknown Date'
+
+    const frontendEvidence: EvidenceItem[] = sources.map((s) => ({
       id: s.id,
-      claim: s.type === 'ON_CHAIN' ? 'Verified block record exists on Ethereum Mainnet.' : 'Attributed to verified creator registration.',
-      type: s.type === 'ON_CHAIN' ? 'on-chain' : 'metadata',
-      confidence: s.confidence === 'VERIFIED' ? 'verified' : 'source-backed',
+      claim: s.type === 'on-chain' ? 'Verified block record exists on Ethereum Mainnet.' : 'Attributed to verified creator registration.',
+      type: s.type as any,
+      confidence: s.confidence.toLowerCase() as any,
       source: s.title,
       sourceHref: s.url,
       detail: `Asset verification payload compiled under schema version ${evidencePackage.schemaVersion}.`
@@ -219,7 +237,7 @@ export async function POST(request: Request) {
         }),
         wallet: t.to,
         txHash: t.transactionHash,
-        confidence: t.confidence === 'VERIFIED' ? 'verified' : 'source-backed',
+        confidence: t.confidence.toLowerCase() as any,
         note: t.type === 'MINT' ? 'Token minted to creator wallet.' : `Transferred from ${t.from.slice(0, 6)}...`
       })),
       ...provenanceRecord.sales.map((s, idx) => ({
@@ -237,20 +255,34 @@ export async function POST(request: Request) {
       }))
     ]
 
-    const projectContext: ProjectContextItem[] = [
-      {
-        id: 'ctx-1',
-        label: 'Collection Details',
-        title: openseaAsset.collection.name,
-        body: openseaAsset.collection.description || 'No description provided.',
-        source: 'OpenSea Collection registry',
-        sourceHref: openseaAsset.openseaUrl,
-        confidence: 'source-backed',
+    const projectContext: ProjectContextItem[] = contextPackage.claims.map((claim, index) => {
+      const relatedSource = contextPackage.sources.find(s => claim.sourceIds.includes(s.id))
+      return {
+        id: claim.id,
+        label: claim.type.replace('_', ' '),
+        title: claim.type === 'ARTWORK_CONTEXT' ? 'Artwork Visual Analysis' : 'Collection Registry Detail',
+        body: claim.text,
+        source: relatedSource ? relatedSource.title : 'MetaMuse Analysis',
+        sourceHref: relatedSource ? relatedSource.url : undefined,
+        confidence: claim.confidence.toLowerCase() as any
       }
-    ]
+    })
 
-    // Construct final matching UI NFT asset
-    const nftResult: NFT = {
+    // Construct final matching UI NFT asset (fully compatible with page.tsx)
+    const nftResult: NFT & {
+      nft: NFTAsset
+      provenance: ProvenanceRecord
+      evidence: EvidenceItem[]
+      context: ContextPackage
+      explanation: ExplanationPackage
+      confidence: number
+      commitments: {
+        evidenceSchemaVersion: number
+        provenanceSchemaVersion: number
+        evidenceHash: string
+        provenanceHash: string
+      }
+    } = {
       id: `ethereum_${contractAddress}_${tokenId}`,
       collection: openseaAsset.collection.name,
       tokenId: `#${tokenId}`,
@@ -270,9 +302,9 @@ export async function POST(request: Request) {
       metadataHash: provenanceHash,
       tokenUri: rpcTokenUri || openseaAsset.metadataUri,
       imageUri: openseaAsset.image,
-      provenanceConfidence: confidence,
+      provenanceConfidence: confidenceScore,
       attested: false,
-      whyThisExists: explanation,
+      whyThisExists: explanation.whyItExists,
       sourcesCount: sources.length,
       visualTraits,
       metadataTraits,
@@ -284,17 +316,24 @@ export async function POST(request: Request) {
         collection: 'Pudgy Penguins',
         image: 'https://i.seadn.io/gae/yNiF1s2ZrlwJe7wmLre46CBoCfJstg5J95E4gCH69E4B3_1sN_g3L5E0J5D9J1F9_G6=w600',
         similarity: 99
+      },
+      nft: openseaAsset,
+      provenance: provenanceRecord,
+      context: contextPackage,
+      explanation,
+      confidence: confidenceScore,
+      commitments: {
+        evidenceSchemaVersion: 1,
+        provenanceSchemaVersion: 1,
+        evidenceHash,
+        provenanceHash
       }
     }
 
     // Cache the completed analysis result on the server
     serverCache.set(`nft:${nftResult.id}`, nftResult)
 
-    return NextResponse.json({
-      analysisId: nftResult.id,
-      status: 'success',
-      nft: nftResult
-    })
+    return NextResponse.json(nftResult)
   } catch (err: any) {
     console.error('Unhandled pipeline exception:', err)
     return NextResponse.json({ error: 'UNKNOWN_ERROR' }, { status: 500 })
