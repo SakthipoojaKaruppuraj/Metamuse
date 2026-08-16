@@ -3,7 +3,7 @@
 import React, { Suspense, useEffect, useState, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { mockNFTs } from '@/lib/data'
+import { mockNFTs, type NFT } from '@/lib/data'
 import { Card } from '@/components/ui/surface'
 import { Eyebrow } from '@/components/ui/badges'
 import { Button } from '@/components/ui/button'
@@ -26,8 +26,9 @@ function VerifyContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const id = searchParams.get('id') || 'example-genesis-1837'
-  const nft = mockNFTs[id]
-
+  
+  const [nft, setNft] = useState<NFT | null>(null)
+  const [nftLoading, setNftLoading] = useState(true)
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -39,6 +40,44 @@ function VerifyContent() {
   const [onChainVersion, setOnChainVersion] = useState<number | null>(null)
   const [status, setStatus] = useState<'match' | 'mismatch' | 'unverified'>('unverified')
 
+  // 1. Dynamic NFT loading: Presets -> LocalStorage -> Server API
+  useEffect(() => {
+    async function loadNftData() {
+      if (!id) return
+      
+      if (mockNFTs[id]) {
+        setNft(mockNFTs[id])
+        setNftLoading(false)
+        return
+      }
+
+      try {
+        const stored = localStorage.getItem(`nft:${id}`)
+        if (stored) {
+          setNft(JSON.parse(stored))
+          setNftLoading(false)
+          return
+        }
+      } catch (e) {
+        console.warn('Failed to parse from localStorage:', e)
+      }
+
+      try {
+        const res = await fetch(`/api/nft/details?id=${id}`)
+        if (res.ok) {
+          const data = await res.json()
+          setNft(data)
+        }
+      } catch (err) {
+        console.error('Failed to retrieve analysis from server:', err)
+      } finally {
+        setNftLoading(false)
+      }
+    }
+
+    loadNftData()
+  }, [id])
+
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text)
     setCopiedField(field)
@@ -47,10 +86,8 @@ function VerifyContent() {
 
   const currentEvidenceHash = useMemo(() => {
     if (!nft) return ''
-    if (getAppMode() === 'real') {
-      return generateDemoCommitments(nft).evidenceHash
-    }
-    return nft.imageHash
+    if (nft.imageHash) return nft.imageHash
+    return generateDemoCommitments(nft).evidenceHash
   }, [nft])
 
   useEffect(() => {
@@ -60,7 +97,7 @@ function VerifyContent() {
       if (mode === 'real') {
         setLoading(true)
         try {
-          const commitments = generateDemoCommitments(nft)
+          const evHash = nft.imageHash || generateDemoCommitments(nft).evidenceHash
           const latest = await getLatestAttestation(nft.contract, nft.tokenId)
 
           if (latest.version > 0) {
@@ -71,7 +108,7 @@ function VerifyContent() {
             setOnChainBlock(nft.attestation?.block || '#54166065')
 
             // Query on-chain verifyAttestation
-            const isMatch = await verifyAttestation(nft.contract, nft.tokenId, commitments.evidenceHash)
+            const isMatch = await verifyAttestation(nft.contract, nft.tokenId, evHash)
             setStatus(isMatch ? 'match' : 'mismatch')
           } else {
             setStatus('unverified')
@@ -95,15 +132,26 @@ function VerifyContent() {
       }
     }
 
-    performOnChainVerification()
+    if (nft) {
+      performOnChainVerification()
+    }
   }, [nft])
+
+  if (nftLoading) {
+    return (
+      <Card className="p-8 text-center flex flex-col items-center justify-center gap-3">
+        <Loader2 className="size-6 text-primary animate-spin" />
+        <span className="text-sm text-muted-foreground">Retrieving asset verification data...</span>
+      </Card>
+    )
+  }
 
   if (!nft) {
     return (
       <div className="text-center py-12">
         <AlertCircle className="size-8 text-destructive mx-auto mb-2" />
-        <h2 className="text-lg font-bold text-foreground">NFT Not Found</h2>
-        <p className="text-sm text-muted-foreground mt-1">Please select a valid preset below.</p>
+        <h2 className="text-lg font-bold text-foreground">NFT Audit Not Found</h2>
+        <p className="text-sm text-muted-foreground mt-1">Please analyze an NFT or select a preset below.</p>
       </div>
     )
   }
@@ -238,26 +286,26 @@ function VerifyContent() {
           <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Attestation Metadata</h3>
           <dl className="grid gap-x-6 gap-y-3.5 sm:grid-cols-2 text-xs font-mono">
             {[
-              { label: 'Attestor Address', value: finalAttestor },
+              { label: 'Attestor Address', value: finalAttestor || 'N/A' },
               { label: 'Monad Transaction', value: nft.attestation?.txHash || '0x59a1afcd386f3e60ea9630eeb1e7abfc671458b502ff2583d027b925adff76b6', link: true },
-              { label: 'Block Number', value: finalBlock },
+              { label: 'Block Number', value: finalBlock || 'N/A' },
               { label: 'Attestation Version', value: onChainVersion ? onChainVersion.toString() : '1' },
-              { label: 'Attested On', value: finalTimestamp },
+              { label: 'Attested On', value: finalTimestamp || 'N/A' },
             ].map((row) => (
               <div key={row.label} className="flex flex-col gap-0.5">
                 <dt className="text-[10px] text-muted-foreground uppercase font-sans font-bold tracking-wider">{row.label}</dt>
                 <dd className="text-foreground select-all truncate">
-                  {row.link ? (
+                  {row.link && row.value ? (
                     <a
                       href={`${MONAD_EXPLORER_URL}/tx/${row.value}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-primary hover:underline"
                     >
-                      {row.value.slice(0, 14)}...
+                      {(row.value || '').slice(0, 14)}...
                     </a>
                   ) : (
-                    row.value
+                    row.value || 'N/A'
                   )}
                 </dd>
               </div>
