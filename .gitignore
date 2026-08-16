@@ -24,3 +24,9 @@ frontend/.next/
 *.njsproj
 *.sln
 *.sw?
+
+# Agent rule files
+*AGENTS.md
+*CLAUDE.md
+*agents.md
+*claude.md
